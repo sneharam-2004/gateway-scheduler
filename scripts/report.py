@@ -69,11 +69,17 @@ def send(key: str, sender: str, to: str, subject: str, body: str) -> None:
         data=json.dumps({"from": sender, "to": [to],
                          "subject": subject, "text": body}).encode(),
         headers={"Authorization": f"Bearer {key}",
-                 "Content-Type": "application/json"},
+                 "Content-Type": "application/json",
+                 # Not cosmetic. The API sits behind a CDN that rejects
+                 # urllib's default signature with a 403 and a code that says
+                 # nothing about mail, so the first run of this mailer failed
+                 # for a reason that had nothing to do with the message. Any
+                 # non-default agent passes.
+                 "User-Agent": "gateway-scheduler/1.0"},
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=30) as r:
-        print(f"[report] resend {r.status}")
+        print(f"[report] sent, {r.status}")
 
 
 def main() -> int:
@@ -128,9 +134,16 @@ def main() -> int:
 
     try:
         send(key, sender, to, subject, body)
+    except urllib.error.HTTPError as e:
+        # The provider's own words. A mailer that cannot mail and will not say
+        # why is the same dead end as no mailer: the first run of this one
+        # printed "HTTPError" and nothing else, and the cause took a separate
+        # investigation. The body carries no credential, only a complaint about
+        # the sender or the payload.
+        print(f"[report] NOT SENT, provider returned {e.code}: {e.read(400).decode('utf-8', 'replace')}")
     except (urllib.error.URLError, OSError) as e:
         # Never mask the original problem behind a mail problem.
-        print(f"[report] could not send mail: {type(e).__name__}")
+        print(f"[report] NOT SENT, {type(e).__name__}: {str(e)[:200]}")
 
     print(f"[report] {subject}")
     return 1
