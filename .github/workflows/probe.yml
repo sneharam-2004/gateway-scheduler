@@ -1,0 +1,86 @@
+name: Reachability probe
+
+# WHY THIS RUNS BEFORE ANYTHING ELSE
+#
+# The schedule depends on one number nobody has measured from a hosted runner:
+# how many requests an upstream answers before it starts resetting connections.
+#
+# Measured 2026-09-13 from two other IPs:
+#   a residential IP    upstream A: reset on request 1
+#   a datacenter IP     upstream A: 6/10 at one request per 10s
+#   both                upstream B: 12/12 clean
+#
+# So upstream A throttles connections rather than banning addresses, and the
+# residential IP is separately burned from an older run. A hosted runner is a
+# third address and its behaviour follows from neither. Nothing is scheduled
+# against upstream A until this job reports what a hosted runner actually gets.
+#
+# Dispatch only, on purpose. A probe on a cron is just an unpoliced crawler.
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_requests:
+        description: 'Requests per upstream (keep low; raise only after a clean run)'
+        type: number
+        default: 12
+      delay_seconds:
+        description: 'Seconds between requests'
+        type: number
+        default: 10
+
+concurrency:
+  group: probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      # Code, targets and selectors all live in the private repo. Nothing in
+      # this public one identifies them.
+      - name: Check out the private pipeline
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.PRIVATE_REPO }}
+          token: ${{ secrets.CI_CHECKOUT_PAT }}
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - run: pip install --quiet httpx
+
+      # Exits non-zero when an upstream refused, so a blocked runner turns the
+      # run red instead of filing a tidy summary nobody reads.
+      - name: Probe
+        run: |
+          python scripts/watch/rate_probe.py \
+            --all \
+            --max ${{ inputs.max_requests }} \
+            --delay ${{ inputs.delay_seconds }} \
+            --json probe.json
+
+      # always(), because the interesting run is the one that failed.
+      - name: Keep the result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: probe-${{ github.run_id }}
+          path: probe.json
+          if-no-files-found: warn
+
+      # Resend, matching the other pipeline on this account. Recipient and
+      # sender are secrets: a public repo should not carry an address either.
+      - name: Report
+        if: always()
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          ALERT_EMAIL:    ${{ secrets.ALERT_EMAIL }}
+          EMAIL_FROM:     ${{ secrets.EMAIL_FROM }}
+          JOB_STATUS:     ${{ job.status }}
+          RUN_URL:        ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: python scripts/watch/probe_report.py --status "$JOB_STATUS" --json probe.json
