@@ -12,11 +12,11 @@ credentials. One repo cannot be both, so there are two:
 
 | repo | visibility | holds |
 |---|---|---|
-| this one | public | workflows only, so the minutes are free |
+| this one | public | workflows, and the mailer they alert with |
 | the pipeline | private | code, targets, selectors, data |
 
-Each workflow checks the private repo out at run time and calls into it. That
-is all these files do.
+Each workflow checks this repo out at the root, mounts the private repo at
+`pipeline/`, and calls into it. That is all these files do.
 
 ## Nothing here is identifying
 
@@ -29,6 +29,11 @@ in a comment either. Everything specific arrives at run time:
 | `secrets.CI_CHECKOUT_PAT` | reads it |
 | `secrets.ALERT_EMAIL`, `secrets.EMAIL_FROM` | who is told when something breaks |
 | the private repo | every upstream host and selector |
+
+`scripts/report.py` is the one piece of code here, and it is the exception that
+proves the rule: it formats and sends the failure mail using only labels the run
+hands it. No artifacts are uploaded, because an artifact on a public repository
+is world-downloadable and the run data records the URL of every request.
 
 The repo name follows the same rule as the machine names in this fleet: it
 describes nothing. A change that puts a target, a brand or an address in here
@@ -67,6 +72,14 @@ the signal that survives the mail itself failing.
 takes its own failure-mail step down with it. That has happened on the sibling
 pipeline and nobody was told, so a separate job on a separate schedule asks the
 only question that survives it: when did this workflow last *succeed*?
+
+The first run here failed the same way in miniature. The mailer lived in the
+private repo, the private checkout failed, and every later step was skipped
+including the one that mails. Red run, empty inbox. Hence the rule that decides
+where code goes in these workflows: **an alert step may only use what is present
+before the first step that can fail.** Not the private checkout, not
+`setup-python`, not `pip install`. Standard library, checked out with the
+workflow itself.
 
 **Silence is not success.** "0 new, 0 failed" is what a healthy day and a
 completely broken crawler both look like. Attempts, answers and refusals are

@@ -39,42 +39,40 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      # Code, targets and selectors all live in the private repo. Nothing in
-      # this public one identifies them.
+      # This repo first, at the root. It carries the mailer, which must not be
+      # able to go missing: on the first run the private checkout failed, every
+      # later step was skipped including the one that mails, and the failure
+      # went unreported. The alert cannot share fate with what it watches.
+      - uses: actions/checkout@v4
+
+      # Code, targets and selectors live in the private repo, mounted in a
+      # subdirectory so it cannot displace the mailer above.
       - name: Check out the private pipeline
         uses: actions/checkout@v4
         with:
           repository: ${{ vars.PRIVATE_REPO }}
           token: ${{ secrets.CI_CHECKOUT_PAT }}
+          path: pipeline
           fetch-depth: 1
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - run: pip install --quiet httpx
 
       # Exits non-zero when an upstream refused, so a blocked runner turns the
       # run red instead of filing a tidy summary nobody reads.
+      #
+      # No artifact upload. The JSON records the URL of every request, and an
+      # artifact on a public repository is world-downloadable. The run log
+      # carries the same table without the hosts, which is the whole point of
+      # the split.
       - name: Probe
         run: |
-          python scripts/watch/rate_probe.py \
+          python3 pipeline/scripts/watch/rate_probe.py \
             --all \
             --max ${{ inputs.max_requests }} \
             --delay ${{ inputs.delay_seconds }} \
             --json probe.json
 
-      # always(), because the interesting run is the one that failed.
-      - name: Keep the result
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: probe-${{ github.run_id }}
-          path: probe.json
-          if-no-files-found: warn
-
-      # Resend, matching the other pipeline on this account. Recipient and
-      # sender are secrets: a public repo should not carry an address either.
+      # always(), because the interesting run is the one that failed. Standard
+      # library only, so it needs neither setup-python nor pip, both of which
+      # are steps that can be skipped.
       - name: Report
         if: always()
         env:
@@ -83,4 +81,4 @@ jobs:
           EMAIL_FROM:     ${{ secrets.EMAIL_FROM }}
           JOB_STATUS:     ${{ job.status }}
           RUN_URL:        ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: python scripts/watch/probe_report.py --status "$JOB_STATUS" --json probe.json
+        run: python3 scripts/report.py --status "$JOB_STATUS" --json probe.json
