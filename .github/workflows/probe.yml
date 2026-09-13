@@ -47,11 +47,17 @@ jobs:
 
       # Code, targets and selectors live in the private repo, mounted in a
       # subdirectory so it cannot displace the mailer above.
+      #
+      # A read-only DEPLOY KEY, not a PAT. A fine-grained PAT grants whatever
+      # its repository-access list says, which is an account-wide setting that
+      # cannot be read or changed from the API and drifted wrong here for two
+      # days. This key is scoped to one repository, is read-only, and is
+      # revocable in one command without touching anything else.
       - name: Check out the private pipeline
         uses: actions/checkout@v4
         with:
           repository: ${{ vars.PRIVATE_REPO }}
-          token: ${{ secrets.CI_CHECKOUT_PAT }}
+          ssh-key: ${{ secrets.PIPELINE_DEPLOY_KEY }}
           path: pipeline
           fetch-depth: 1
 

@@ -26,7 +26,7 @@ in a comment either. Everything specific arrives at run time:
 | arrives as | what |
 |---|---|
 | `vars.PRIVATE_REPO` | the repo to check out |
-| `secrets.CI_CHECKOUT_PAT` | reads it |
+| `secrets.PIPELINE_DEPLOY_KEY` | reads it |
 | `secrets.ALERT_EMAIL`, `secrets.EMAIL_FROM` | who is told when something breaks |
 | the private repo | every upstream host and selector |
 
@@ -51,10 +51,17 @@ Secrets:
 
 | name | what |
 |---|---|
-| `CI_CHECKOUT_PAT` | fine-grained PAT, `contents: read` on the private repo only |
+| `PIPELINE_DEPLOY_KEY` | read-only deploy key for the private repo, private half |
 | `RESEND_API_KEY` | same provider the sibling pipeline already uses |
 | `ALERT_EMAIL` | where failures go |
 | `EMAIL_FROM` | verified Resend sender |
+
+A deploy key rather than a PAT, chosen after a PAT cost two days. A
+fine-grained PAT's access is the product of two independent account-level
+settings, neither readable nor writable from the API, and a wrong one fails as
+a bare `404` that looks identical to a missing repo. A deploy key is scoped to
+one repository, is read-only, lives in that repository's own settings, and is
+revocable with `gh repo deploy-key delete` without affecting anything else.
 
 Mail is an explicit step in each workflow rather than a notification setting,
 because GitHub's own failure notices go to the repo owner's address, which is
