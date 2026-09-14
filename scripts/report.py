@@ -42,6 +42,29 @@ def summarise(data: dict) -> tuple[list[str], list[str]]:
     """Return (reasons to alert, lines for the body)."""
     reasons: list[str] = []
     lines: list[str] = []
+
+    # URL-map check. It exists because its failure mode is silent: the source
+    # changed its url format, every constructed url began returning 404, and
+    # three separate wrong explanations were built on that before anyone asked
+    # whether the urls were real. A drop here means the crawler is about to
+    # work from urls that do not exist.
+    if "ok_rate" in data or "total" in data:
+        total = data.get("total")
+        if total is not None:
+            counts = ", ".join(f"{k} {v}" for k, v in (data.get("counts") or {}).items())
+            lines.append(f"url map: {total} entities ({counts})")
+        if data.get("error"):
+            reasons.append(f"url map could not be built: {data['error']}")
+        rate = data.get("ok_rate")
+        if rate is not None:
+            lines.append(f"sampled {data.get('sampled')}, {data.get('failed')} failed, "
+                         f"{rate}% answered 200")
+            if rate < 90:
+                reasons.append(f"only {rate}% of sampled source urls answered 200; the map "
+                               f"is stale or the format changed again")
+        if total is not None and total < 50_000:
+            reasons.append(f"url map collapsed to {total} entities; it has been ~218,000")
+
     for r in data.get("results", []):
         name = r.get("source", "?")
         if r.get("aborted"):
