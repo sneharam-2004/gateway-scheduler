@@ -78,7 +78,18 @@ def summarise(data: dict) -> tuple[list[str], list[str]]:
     # and no code can tell which. A run that checked nothing is a slice that
     # resolved to nobody, which is the map or the counts failing quietly. New
     # scenes are the job working and go in the body, never the subject.
-    if "error_rate" in data and "queue" in data:
+    if data.get("dry_run"):
+        # A rehearsal reports coverage and nothing else. Its checked/grew/
+        # shrank are all zero by definition, and reading those as a real
+        # result would say "checked 0" in a mail about a run that worked.
+        lines.append(f"freshness DRY RUN: resolved {data.get('resolved', 0)} of "
+                     f"{data.get('resolved', 0) + data.get('unresolved', 0)} "
+                     f"sampled, {data.get('catalog_people', 0)} people held. "
+                     "Nothing was fetched from the source.")
+        if data.get("unresolved"):
+            reasons.append(f"{data['unresolved']} held entities are not in the "
+                           "source index, so a real run would report them as errors")
+    elif "error_rate" in data and "queue" in data:
         s = data.get("summary") or {}
         lines.append(f"freshness: checked {data.get('checked', 0)}, "
                      f"unchanged {s.get('unchanged', 0)}, grew {s.get('grew', 0)} "
