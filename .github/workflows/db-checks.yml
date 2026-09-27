@@ -1,0 +1,73 @@
+name: DB checks
+
+# WHAT THIS ANSWERS
+#
+# "Do the numbers the pages render still match the rows behind them, and has
+# the duplicate class come back?" Every assertion recounts from the table in a
+# process separate from whatever wrote it, because on 2026-09-20/21 five
+# different bulk writes reported success while doing nothing, doing half, or
+# doing it and reporting failure.
+#
+# Separate from Site checks because this one needs a credential. A check that
+# needs a secret must not be able to skip the checks that do not: on 2026-09-13
+# a failed private checkout skipped every later step including the mailer.
+#
+# Daily, not hourly. One run reads 8.9M rows in 30s; hourly would be 213M rows
+# a day, and none of these answers changes except when a bulk job runs. Dispatch
+# it manually before and after any import, dedupe or recompute instead.
+#
+# Cron is commented out until a human has read a dispatch run end to end, which
+# is the standing rule for every workflow in this repo.
+
+on:
+  workflow_dispatch:
+    inputs:
+      daily:
+        description: 'Include the heavy checks (photo_sections diff, photos floor)'
+        type: boolean
+        default: true
+  # schedule:
+  #   - cron: '17 4 * * *'   # uncomment after the first dispatch run is read
+
+concurrency:
+  group: db-checks
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      # This repo only: it carries the check and the mailer, and neither can be
+      # skipped by a failed checkout of anything else.
+      - uses: actions/checkout@v4
+
+      # Read-only D1 token, scoped to nothing else. Exits non-zero on any failed
+      # check so the run goes red; the mailer below reports why.
+      - name: Check out the private pipeline
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.PRIVATE_REPO }}
+          ref: main
+          ssh-key: ${{ secrets.PIPELINE_DEPLOY_KEY }}
+          path: pipeline
+          fetch-depth: 1
+
+      - name: Recount the database
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          D1_READ_TOKEN:         ${{ secrets.D1_READ_TOKEN }}
+        run: |
+          python3 pipeline/scripts/ci/db_checks.py --json db.json \
+            ${{ inputs.daily && '--daily' || '' }}
+
+      - name: Report
+        if: always()
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          ALERT_EMAIL:    ${{ secrets.ALERT_EMAIL }}
+          EMAIL_FROM:     ${{ secrets.EMAIL_FROM }}
+          JOB_STATUS:     ${{ job.status }}
+          RUN_URL:        ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: python3 scripts/report.py --status "$JOB_STATUS" --json db.json --label "db checks"

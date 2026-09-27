@@ -65,6 +65,41 @@ def summarise(data: dict) -> tuple[list[str], list[str]]:
         if total is not None and total < 50_000:
             reasons.append(f"url map collapsed to {total} entities; it has been ~218,000")
 
+    # Freshness watch. Three things are worth a mail and one is worth a line.
+    # A high error rate means the counts cannot be trusted, and the script
+    # already exited non-zero for it. Anything that SHRANK needs a human,
+    # because it is either the source pulling scenes or our selector breaking,
+    # and no code can tell which. A run that checked nothing is a slice that
+    # resolved to nobody, which is the map or the counts failing quietly. New
+    # scenes are the job working and go in the body, never the subject.
+    if "error_rate" in data and "queue" in data:
+        s = data.get("summary") or {}
+        lines.append(f"freshness: checked {data.get('checked', 0)}, "
+                     f"unchanged {s.get('unchanged', 0)}, grew {s.get('grew', 0)} "
+                     f"(+{data.get('new_scenes', 0)} scenes), shrank {s.get('shrank', 0)}, "
+                     f"errors {s.get('error', 0)} ({round(100 * data['error_rate'])}%)")
+        if data.get("checked", 0) == 0:
+            reasons.append("freshness watch checked nobody; the slice resolved to no one")
+        if data["error_rate"] > 0.10:
+            reasons.append(f"freshness watch error rate {round(100 * data['error_rate'])}%; "
+                           f"counts are not trustworthy")
+        if data.get("shrank"):
+            names = ", ".join(r.get("name", "?") for r in data["shrank"][:5])
+            reasons.append(f"{len(data['shrank'])} person(s) have fewer scenes at the source "
+                           f"than we hold: {names}")
+        for r in (data.get("queue") or [])[:10]:
+            lines.append(f"  +{r.get('delta')} {r.get('name')} ({r.get('stored')} -> {r.get('live')})")
+
+    # Site checks. Each check is {name, ok, detail}. A failed check is a
+    # reason; every check is a body line so a green run still shows what it
+    # measured. The check script decides pass/fail against its own ceilings,
+    # which are written BELOW the current numbers where a known defect is
+    # waiting on a fix, so the run is red until the fix lands, on purpose.
+    for c in data.get("checks", []):
+        mark = "ok  " if c.get("ok") else "FAIL"
+        lines.append(f"  {mark} {c.get('name')}: {c.get('detail', '')}")
+        if not c.get("ok"):
+            reasons.append(f"{c.get('name')}: {c.get('detail', '')}")
     for r in data.get("results", []):
         name = r.get("source", "?")
         if r.get("aborted"):

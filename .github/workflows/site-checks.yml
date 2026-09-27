@@ -1,0 +1,61 @@
+name: Site checks
+
+# WHAT THIS ANSWERS
+#
+# "Is the live site still true in the ways that returned 200 while broken this
+# week?" Cache headers on the per-kind routes, one h1 per page, no source brand
+# in rendered text, header and rail agreeing on a count, and the home page
+# answering in under two seconds, which is the first thing to fail when
+# anything writes to D1.
+#
+# HTTP only, against production, no checkout of the site and no secret in the
+# check path. That is deliberate: the site repo has no remote yet, and a check
+# that needs a token can be skipped by a missing token. The D1 rows_read
+# ceilings need a read token and are a separate workflow.
+#
+# Dispatch only, like its siblings, until a dispatch run has been read by a
+# human. A cron here is cheap (one runner-minute) and the expected cadence is
+# every 30 minutes, but not before someone has seen a red run and agreed the
+# red is right.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: site-checks
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      # This repo only. It carries both the check and the mailer; nothing here
+      # can be skipped by a failed checkout of something else.
+      - uses: actions/checkout@v4
+
+      # Exits non-zero on any failed check, so the run goes red. Ceilings are
+      # set below the current numbers where a fix is known and waiting, so a
+      # red run before that fix lands is the intended state, not noise.
+      - name: Check out the private pipeline
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.PRIVATE_REPO }}
+          ref: main
+          ssh-key: ${{ secrets.PIPELINE_DEPLOY_KEY }}
+          path: pipeline
+          fetch-depth: 1
+
+      - name: Check the live site
+        run: python3 pipeline/scripts/ci/site_checks.py --json checks.json
+
+      - name: Report
+        if: always()
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          ALERT_EMAIL:    ${{ secrets.ALERT_EMAIL }}
+          EMAIL_FROM:     ${{ secrets.EMAIL_FROM }}
+          JOB_STATUS:     ${{ job.status }}
+          RUN_URL:        ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: python3 scripts/report.py --status "$JOB_STATUS" --json checks.json --label "site checks"

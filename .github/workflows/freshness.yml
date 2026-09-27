@@ -1,0 +1,112 @@
+name: Freshness watch
+
+# WHAT THIS ANSWERS
+#
+# "Has the source published new scenes for people we already hold?" Asked as
+# a count diff, one request per person, over a rotating fortnightly slice, so
+# a catalogue of ~34,500 people costs ~2,500 requests a day and nobody is
+# swept.
+#
+# Two inputs, both chosen so a stale copy of ourselves cannot masquerade as
+# the truth. What we hold comes from the live database, not from an import
+# snapshot. Where to look comes from the upstream's own index, resolved by the
+# same check the "Source URL map" workflow runs, never from a URL built out of
+# a slug: the constructed shape 404s for every entity the upstream moved, and
+# that reads as a catalogue-wide deletion.
+#
+# It detects and reports. It imports nothing. The queue it writes is read by a
+# separate promote step that runs with the daily eval described in the
+# pipeline's freshness design, because auto-import is only safe with the eval
+# that would catch a quietly wrong one.
+#
+# Dispatch only, on purpose, like its siblings. Nothing goes on a cron here
+# until a dispatch-only run has been read end to end by a human.
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: 'Cap the people checked this run (0 = whole slice)'
+        type: number
+        default: 200
+      dry_run:
+        description: 'Load counts and resolve URLs, fetch nothing'
+        type: boolean
+        default: false
+
+concurrency:
+  group: freshness
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      # This repo first, at the root: it carries the mailer, which must not be
+      # able to go missing. An alert step may only use what is present before
+      # the first step that can fail.
+      - uses: actions/checkout@v4
+
+      - name: Check out the private pipeline
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.PRIVATE_REPO }}
+          ref: main
+          ssh-key: ${{ secrets.PIPELINE_DEPLOY_KEY }}
+          path: pipeline
+          fetch-depth: 1
+
+      # The one dependency, and it is not in the alert path: the mailer above
+      # is standard library and already checked out.
+      - name: Install the HTTP client
+        run: python3 -m pip install --quiet httpx
+
+      # The map first, as its own step, so a partial or stale index fails here
+      # with its own message rather than as a thousand errors in the watch.
+      - name: Resolve the source index
+        run: |
+          python3 pipeline/scripts/watch/source_urls.py \
+            --refresh \
+            --verify 10 \
+            --json map.json
+        env:
+          SOURCE_URL_CACHE: ${{ runner.temp }}/source-urls.json
+
+      # Counts from D1 over HTTPS with a read-only token. The queue holds our
+      # own slugs and counts and no upstream URL; error text has hosts scrubbed
+      # before it is written, because this log is public.
+      - name: Watch
+        run: |
+          python3 pipeline/scripts/watch/new_clips.py \
+            --from-d1 \
+            $([ "${{ inputs.limit }}" != "0" ] && echo "--limit ${{ inputs.limit }}") \
+            ${{ inputs.dry_run && '--dry-run' || '' }} \
+            --out watch.json
+        env:
+          SOURCE_URL_CACHE: ${{ runner.temp }}/source-urls.json
+          CLOUDFLARE_API_TOKEN: ${{ secrets.D1_READ_TOKEN }}
+
+      # always(), because the interesting run is the one that failed. Two
+      # summaries, two labels: a stale map and a broken watch are different
+      # problems with different fixes.
+      - name: Report the map
+        if: always()
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          ALERT_EMAIL:    ${{ secrets.ALERT_EMAIL }}
+          EMAIL_FROM:     ${{ secrets.EMAIL_FROM }}
+          JOB_STATUS:     ${{ job.status }}
+          RUN_URL:        ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: python3 scripts/report.py --status "$JOB_STATUS" --json map.json --label "source url map"
+
+      - name: Report the watch
+        if: always()
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          ALERT_EMAIL:    ${{ secrets.ALERT_EMAIL }}
+          EMAIL_FROM:     ${{ secrets.EMAIL_FROM }}
+          JOB_STATUS:     ${{ job.status }}
+          RUN_URL:        ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: python3 scripts/report.py --status "$JOB_STATUS" --json watch.json --label "freshness watch"
