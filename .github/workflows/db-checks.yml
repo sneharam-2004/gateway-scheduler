@@ -25,7 +25,14 @@ on:
       daily:
         description: 'Include the heavy checks (photo_sections diff, photos floor)'
         type: boolean
-        default: true
+        # FALSE by default, and the scheduled run turns them on instead. This
+        # was `true`, which inverted the whole design: a `schedule` event
+        # carries no `inputs`, so the once-a-day cron ran the CHEAP set while
+        # every ad-hoc dispatch ran the heavy one. Measured over 09-21 to
+        # 09-27 that was ~11 heavy runs a day at 6.06M rows each, the largest
+        # non-visitor share of the read bill, for a question that only changes
+        # when a bulk job writes.
+        default: false
   # Daily, NOT hourly, and the arithmetic is the reason. One run recounts
   # ~16M rows; hourly would be ~380M a day against a database whose read bill
   # has already been an incident once. None of these questions changes minute
@@ -65,7 +72,7 @@ jobs:
           D1_READ_TOKEN:         ${{ secrets.D1_READ_TOKEN }}
         run: |
           python3 pipeline/scripts/ci/db_checks.py --json db.json \
-            ${{ inputs.daily && '--daily' || '' }}
+            ${{ (github.event_name == 'schedule' || inputs.daily) && '--daily' || '' }}
 
       - name: Report
         if: always()
