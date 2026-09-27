@@ -1,0 +1,45 @@
+name: Watchdog
+
+# Watches the other workflows, because a schedule that has stopped firing and
+# a run that died before its check step both look exactly like health from
+# outside. Runs on its own cron so it does not share fate with what it judges.
+#
+# Daily at 06:40 UTC, offset from the checks it watches so it reads a settled
+# state rather than racing them.
+
+on:
+  schedule:
+    - cron: '40 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  actions: write        # required for the 60-day keepalive; read-only makes it a no-op
+  contents: read
+
+concurrency:
+  group: watchdog
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the schedules are alive and the checks actually ran
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/watchdog.py --json watchdog.json
+
+      # if: always(), because the step above exits non-zero when it finds
+      # something, and the mail is the whole point of finding it.
+      - name: Report
+        if: always()
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          ALERT_EMAIL:    ${{ secrets.ALERT_EMAIL }}
+          EMAIL_FROM:     ${{ secrets.EMAIL_FROM }}
+          JOB_STATUS:     ${{ job.status }}
+          RUN_URL:        ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: python3 scripts/report.py --status "$JOB_STATUS" --json watchdog.json --label "watchdog"

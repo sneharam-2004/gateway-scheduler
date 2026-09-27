@@ -19,6 +19,12 @@ name: Site checks
 # red is right.
 
 on:
+  # Every two hours. These are HTTP only: no token, no database reads, so the
+  # cadence costs nothing and the failures they catch (a route serving
+  # no-store, an h1 vanishing, the home page stalling under an import) appear
+  # and disappear within hours.
+  schedule:
+    - cron: '25 */2 * * *'
   workflow_dispatch:
 
 concurrency:

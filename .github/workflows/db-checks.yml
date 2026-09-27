@@ -26,8 +26,13 @@ on:
         description: 'Include the heavy checks (photo_sections diff, photos floor)'
         type: boolean
         default: true
-  # schedule:
-  #   - cron: '17 4 * * *'   # uncomment after the first dispatch run is read
+  # Daily, NOT hourly, and the arithmetic is the reason. One run recounts
+  # ~16M rows; hourly would be ~380M a day against a database whose read bill
+  # has already been an incident once. None of these questions changes minute
+  # to minute either: they change when a bulk job runs. So daily, plus a
+  # dispatch before and after any bulk write.
+  schedule:
+    - cron: '17 4 * * *'
 
 concurrency:
   group: db-checks
