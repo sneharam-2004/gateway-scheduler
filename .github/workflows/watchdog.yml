@@ -40,6 +40,7 @@ jobs:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           ALERT_EMAIL:    ${{ secrets.ALERT_EMAIL }}
           EMAIL_FROM:     ${{ secrets.EMAIL_FROM }}
+          ALERT_PREFIX:     ${{ secrets.ALERT_PREFIX }}
           JOB_STATUS:     ${{ job.status }}
           RUN_URL:        ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: python3 scripts/report.py --status "$JOB_STATUS" --json watchdog.json --label "watchdog"

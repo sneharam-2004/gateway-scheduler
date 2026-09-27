@@ -183,7 +183,15 @@ def main() -> int:
             print(f"  {l}")
         return 0
 
-    subject = f"[gateway] {a.label}: {reasons[0]}"
+    # The project name comes from a SECRET, not a literal, and that is the
+    # whole trick. Arun runs several of these and "[gateway] site checks
+    # failed" does not say which site, so the mail has to name the
+    # project. But this repo is public and every log line it prints is
+    # public with it, so a literal here would publish the link between
+    # this repo and that site. As a secret, GitHub masks it in the logs
+    # and it still reads correctly in the mail.
+    prefix = os.environ.get("ALERT_PREFIX") or "gateway"
+    subject = f"[{prefix}] {a.label}: {reasons[0]}"
     body = "\n".join([
         f"A scheduled run needs attention ({a.label}).",
         "",
@@ -203,7 +211,7 @@ def main() -> int:
                                   ("EMAIL_FROM", sender)) if not v]
         # Deliberately still a failure. A missing secret silently disabling the
         # alerting is the exact failure this pipeline is built to not have.
-        print(f"[report] WOULD send:\n{subject}\n\n{body}")
+        print(f"[report] WOULD send, subject label {a.label}, {len(reasons)} reason(s)")
         print(f"[report] not sent, missing: {', '.join(missing)}")
         return 1
 
@@ -220,7 +228,10 @@ def main() -> int:
         # Never mask the original problem behind a mail problem.
         print(f"[report] NOT SENT, {type(e).__name__}: {str(e)[:200]}")
 
-    print(f"[report] {subject}")
+    # The label, never the subject: the subject carries the project name
+    # and this print lands in a public log. GitHub masks secrets anyway;
+    # this does not rely on it.
+    print(f"[report] {a.label}: {reasons[0][:90]}")
     return 1
 
 
