@@ -48,7 +48,13 @@ def summarise(data: dict) -> tuple[list[str], list[str]]:
     # three separate wrong explanations were built on that before anyone asked
     # whether the urls were real. A drop here means the crawler is about to
     # work from urls that do not exist.
-    if "ok_rate" in data or "total" in data:
+    # `"checks" not in data` is load-bearing. The site and db suites also
+    # write a "total" key, meaning their count of checks, so this branch
+    # claimed on 2026-09-27 that the "url map collapsed to 15 entities"
+    # on a run where all 15 checks PASSED. A false alarm in the alert
+    # path is worse than a missing one: it is the thing that teaches you
+    # to stop reading the mail.
+    if "checks" not in data and ("ok_rate" in data or "total" in data):
         total = data.get("total")
         if total is not None:
             counts = ", ".join(f"{k} {v}" for k, v in (data.get("counts") or {}).items())
