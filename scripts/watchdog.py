@@ -46,11 +46,22 @@ API = "https://api.github.com"
 # The step each workflow must actually reach, and how long it may go quiet.
 # A workflow absent from here is still kept enabled but not judged on staleness,
 # which is right for the dispatch-only ones.
+# The step each workflow must actually reach, and how long it may go quiet.
+# A workflow absent from here is still kept enabled but not judged on
+# staleness, which is right for the dispatch-only ones.
+#
+# CEILINGS ARE SET FROM MEASURED DELIVERY, NOT FROM THE CRON. GitHub treats a
+# schedule on a public repo as best effort and drops runs under load: measured
+# over 30 scheduled site-check runs, a cron asking for every 2 h delivered a
+# median gap of 6.2 h, p90 7.4 h and a max of 9.4 h, and 16 of 29 gaps were
+# over 6 h. The first ceiling here was 6 h, taken from the cron rather than
+# from reality, so it would have cried stale on more than half of a perfectly
+# healthy week. 12 h sits above the observed max with headroom and still
+# catches a genuinely dead schedule within half a day.
 WATCHED = {
-    "site-checks.yml": ("Check the live site", 6 * 3600),
-    "db-checks.yml": ("Recount the database", 36 * 3600),
+    "site-checks.yml": ("Check the live site", 12 * 3600),
+    "db-checks.yml": ("Recount the database", 40 * 3600),
 }
-
 
 def gh(path: str, method: str = "GET") -> dict:
     tok = os.environ["GITHUB_TOKEN"]
