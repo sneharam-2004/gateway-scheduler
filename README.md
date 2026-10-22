@@ -100,3 +100,14 @@ requests at 10-second intervals from a datacenter address and resets the rest,
 the other answers everything, and a residential address is refused outright. A
 hosted runner is a different address again, so it gets measured rather than
 assumed. Nothing goes on a cron against the throttled upstream until it reports.
+
+## Video sync (daily, since 2026-10-23)
+
+`video-sync.yml` is the first workflow here that writes. Daily at 02:50 UTC it reads
+the upstream's full video listing, keeps items dated within 14 days of the last good
+run (every item on Sundays), checks each new video and still through the site's own
+proxies as a visitor's browser would, writes the ones that pass, and drops the cached
+copies of the pages they appear on. The watermark moves only on a run where every
+check passed. Its token reaches the database, the page-cache bucket and a cache purge
+on one zone, nothing else. Design and selectors: `docs/video-sync.md` in the private
+pipeline.
