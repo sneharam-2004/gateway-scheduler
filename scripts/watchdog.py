@@ -61,6 +61,8 @@ API = "https://api.github.com"
 WATCHED = {
     "site-checks.yml": ("Check the live site", 12 * 3600),
     "db-checks.yml": ("Recount the database", 40 * 3600),
+    # Daily at 02:50 UTC; 30 h leaves one late start before it reads as lapsed.
+    "video-sync.yml": ("Sync", 30 * 3600),
 }
 
 def gh(path: str, method: str = "GET") -> dict:
