@@ -100,3 +100,52 @@ jobs:
           JOB_STATUS:     ${{ job.status }}
           RUN_URL:        ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: python3 scripts/report.py --status "$JOB_STATUS" --json video-sync.json --label "video sync"
+
+  # The site's second upstream: a WordPress site whose API gives no date for a
+  # new video (it re-saves most posts at once), so every run reads every post
+  # and diffs the video links against what the site holds. Each new video is
+  # probed through /v/; one that is a few seconds of clip padded with a still
+  # frame is recorded and never written. Its own job, so one upstream failing
+  # does not stop the other, and its own mail.
+  second:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check out the private pipeline
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.PRIVATE_REPO }}
+          ref: main
+          ssh-key: ${{ secrets.PIPELINE_DEPLOY_KEY }}
+          path: pipeline
+          fetch-depth: 1
+
+      - name: Install the token library and ffprobe
+        run: |
+          python3 -m pip install --quiet cryptography
+          command -v ffprobe || { sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg; }
+
+      - name: Sync
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.SYNC_CF_TOKEN }}
+          IMAGE_SECRET: ${{ secrets.IMAGE_SECRET }}
+          VIDEO_SECRET: ${{ secrets.VIDEO_SECRET }}
+        run: |
+          python3 pipeline/scripts/watch/sp_sync.py \
+            $([ "${{ inputs.limit || 0 }}" != "0" ] && echo "--limit ${{ inputs.limit }}") \
+            ${{ inputs.dry_run && '--dry-run' || '' }} \
+            --json sp-sync.json
+
+      - name: Report
+        if: always()
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          ALERT_EMAIL:    ${{ secrets.ALERT_EMAIL }}
+          EMAIL_FROM:     ${{ secrets.EMAIL_FROM }}
+          ALERT_PREFIX:   ${{ secrets.ALERT_PREFIX }}
+          JOB_STATUS:     ${{ job.status }}
+          RUN_URL:        ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: python3 scripts/report.py --status "$JOB_STATUS" --json sp-sync.json --label "video sync, second source"

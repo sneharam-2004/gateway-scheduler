@@ -111,3 +111,8 @@ copies of the pages they appear on. The watermark moves only on a run where ever
 check passed. Its token reaches the database, the page-cache bucket and a cache purge
 on one zone, nothing else. Design and selectors: `docs/video-sync.md` in the private
 pipeline.
+
+Its `second` job does the same for the site's second upstream, which has no usable
+dates: it reads every post, diffs the video links against what the site holds, probes
+each new one through `/v/`, and records padded files (a few seconds of clip, then a
+still frame) so they are never written or probed again.
