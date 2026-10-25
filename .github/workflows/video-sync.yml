@@ -101,7 +101,7 @@ jobs:
           RUN_URL:        ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: python3 scripts/report.py --status "$JOB_STATUS" --json video-sync.json --label "video sync"
 
-  # The site's second upstream: a WordPress site whose API gives no date for a
+  # The site's second upstream: its API gives no date for a
   # new video (it re-saves most posts at once), so every run reads every post
   # and diffs the video links against what the site holds. Each new video is
   # probed through /v/; one that is a few seconds of clip padded with a still
