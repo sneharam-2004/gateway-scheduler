@@ -21,6 +21,8 @@ name: Video sync
 # (DNS sinkhole and TLS reset, measured 2026-10-23), so nothing on the home
 # line can read the listing.
 #
+# The photos job (at the end) does the same for new photo galleries.
+#
 # Nothing here names a host. The script scrubs hosts from every error it
 # prints, and nothing is uploaded, because this repository is public.
 #
@@ -46,6 +48,15 @@ on:
         description: 'Plan and verify, write nothing'
         type: boolean
         default: false
+      only:
+        description: 'Run only these jobs'
+        type: choice
+        options: [all, videos, photos]
+        default: all
+      max_stories:
+        description: 'Photos: new galleries handled this run (0 = the script default)'
+        type: number
+        default: 0
 
 concurrency:
   group: video-sync
@@ -53,6 +64,7 @@ concurrency:
 
 jobs:
   sync:
+    if: ${{ inputs.only != 'photos' }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
 
@@ -108,6 +120,7 @@ jobs:
   # frame is recorded and never written. Its own job, so one upstream failing
   # does not stop the other, and its own mail.
   second:
+    if: ${{ inputs.only != 'photos' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
@@ -149,3 +162,50 @@ jobs:
           JOB_STATUS:     ${{ job.status }}
           RUN_URL:        ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: python3 scripts/report.py --status "$JOB_STATUS" --json sp-sync.json --label "video sync, second source"
+
+  # New photo galleries from the main upstream. It lists every gallery from the
+  # upstream's sitemap plus its newest pages (the sitemap lags by days), drops
+  # the ones the site already holds, reads each new gallery's page, sizes every
+  # picture from its header, checks the first picture and the cover through the
+  # site's /i/ proxy, and writes the rows the site then serves through that
+  # proxy. Its own job and its own mail, like the second upstream.
+  photos:
+    if: ${{ inputs.only != 'videos' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check out the private pipeline
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.PRIVATE_REPO }}
+          ref: main
+          ssh-key: ${{ secrets.PIPELINE_DEPLOY_KEY }}
+          path: pipeline
+          fetch-depth: 1
+
+      - name: Install the token library
+        run: python3 -m pip install --quiet cryptography
+
+      - name: Sync
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.SYNC_CF_TOKEN }}
+          IMAGE_SECRET: ${{ secrets.IMAGE_SECRET }}
+        run: |
+          python3 pipeline/scripts/watch/photo_sync.py \
+            $([ "${{ inputs.max_stories || 0 }}" != "0" ] && echo "--max-stories ${{ inputs.max_stories }}") \
+            ${{ inputs.dry_run && '--dry-run' || '' }} \
+            --json photo-sync.json
+
+      - name: Report
+        if: always()
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          ALERT_EMAIL:    ${{ secrets.ALERT_EMAIL }}
+          EMAIL_FROM:     ${{ secrets.EMAIL_FROM }}
+          ALERT_PREFIX:   ${{ secrets.ALERT_PREFIX }}
+          JOB_STATUS:     ${{ job.status }}
+          RUN_URL:        ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: python3 scripts/report.py --status "$JOB_STATUS" --json photo-sync.json --label "photo sync"
