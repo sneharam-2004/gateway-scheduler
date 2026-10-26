@@ -52,9 +52,9 @@ Secrets:
 | name | what |
 |---|---|
 | `PIPELINE_DEPLOY_KEY` | read-only deploy key for the private repo, private half |
-| `RESEND_API_KEY` | same provider the sibling pipeline already uses |
-| `ALERT_EMAIL` | where failures go |
-| `EMAIL_FROM` | verified Resend sender |
+| `RESEND_API_KEY` | the CI Resend account's sending-only key (since 2026-10-26) |
+| `ALERT_EMAIL` | where failures go: the CI Resend account's own address, the only one it can mail (no verified domain) |
+| `EMAIL_FROM` | `CI alerts <onboarding@resend.dev>`, Resend's sender for an account with no domain |
 
 A deploy key rather than a PAT, chosen after a PAT cost two days. A
 fine-grained PAT's access is the product of two independent account-level
