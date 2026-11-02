@@ -1,0 +1,61 @@
+name: Sync audit
+
+# WHAT THIS ANSWERS
+#
+# "Does the catalogue hold what the upstreams show as newest?" Asked by hand, on
+# a route the daily sync does not read (front pages and person pages, not the
+# sitemaps), so a gap in the sync's own listing cannot hide itself.
+#
+# The job only fetches, about 40 pages. The pages are encrypted with a repo
+# secret before upload and kept one day, because this log and its artifacts are
+# public. The comparison runs on a private machine.
+#
+# Dispatch only, on purpose. A check on a cron is just another crawler.
+
+on:
+  workflow_dispatch:
+    inputs:
+      people:
+        description: 'Person pages sampled'
+        type: number
+        default: 25
+
+concurrency:
+  group: sync-audit
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check out the private pipeline
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.PRIVATE_REPO }}
+          ref: main
+          ssh-key: ${{ secrets.PIPELINE_DEPLOY_KEY }}
+          path: pipeline
+          fetch-depth: 1
+
+      - name: Install the token library
+        run: python3 -m pip install --quiet cryptography
+
+      - name: Fetch
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.SYNC_CF_TOKEN }}
+          IMAGE_SECRET: ${{ secrets.IMAGE_SECRET }}
+          VIDEO_SECRET: ${{ secrets.VIDEO_SECRET }}
+        run: |
+          python3 pipeline/scripts/watch/sync_audit.py --people "${{ inputs.people }}" --out pages.tgz
+          openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:VIDEO_SECRET -in pages.tgz -out pages.bin
+          rm pages.tgz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pages
+          path: pages.bin
+          retention-days: 1
