@@ -51,10 +51,18 @@ on:
       only:
         description: 'Run only these jobs'
         type: choice
-        options: [all, videos, photos]
+        options: [all, videos, photos, credits]
         default: all
       max_stories:
         description: 'Photos: new galleries handled this run (0 = the script default)'
+        type: number
+        default: 0
+      credit_pages:
+        description: 'Co-credits: newest-videos pages read (0 = the script default)'
+        type: number
+        default: 0
+      credit_people:
+        description: 'Co-credits: person pages read (0 = the script default)'
         type: number
         default: 0
 
@@ -64,7 +72,7 @@ concurrency:
 
 jobs:
   sync:
-    if: ${{ inputs.only != 'photos' }}
+    if: ${{ inputs.only != 'photos' && inputs.only != 'credits' }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
 
@@ -120,7 +128,7 @@ jobs:
   # frame is recorded and never written. Its own job, so one upstream failing
   # does not stop the other, and its own mail.
   second:
-    if: ${{ inputs.only != 'photos' }}
+    if: ${{ inputs.only != 'photos' && inputs.only != 'credits' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
@@ -170,7 +178,7 @@ jobs:
   # site's /i/ proxy, and writes the rows the site then serves through that
   # proxy. Its own job and its own mail, like the second upstream.
   photos:
-    if: ${{ inputs.only != 'videos' }}
+    if: ${{ inputs.only != 'videos' && inputs.only != 'credits' }}
     runs-on: ubuntu-latest
     timeout-minutes: 150
 
@@ -209,3 +217,49 @@ jobs:
           JOB_STATUS:     ${{ job.status }}
           RUN_URL:        ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: python3 scripts/report.py --status "$JOB_STATUS" --json photo-sync.json --label "photo sync"
+
+  # A shared scene is listed under its first person only; the source's own pages
+  # credit every person in it. After `sync`, so today's videos are held first.
+  credits:
+    needs: sync
+    if: ${{ always() && inputs.only != 'photos' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check out the private pipeline
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.PRIVATE_REPO }}
+          ref: main
+          ssh-key: ${{ secrets.PIPELINE_DEPLOY_KEY }}
+          path: pipeline
+          fetch-depth: 1
+
+      - name: Install the token library
+        run: python3 -m pip install --quiet cryptography
+
+      - name: Credit
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.SYNC_CF_TOKEN }}
+          IMAGE_SECRET: ${{ secrets.IMAGE_SECRET }}
+          VIDEO_SECRET: ${{ secrets.VIDEO_SECRET }}
+        run: |
+          python3 pipeline/scripts/watch/co_credits.py \
+            $([ "${{ inputs.credit_pages || 0 }}" != "0" ] && echo "--pages ${{ inputs.credit_pages }}") \
+            $([ "${{ inputs.credit_people || 0 }}" != "0" ] && echo "--people ${{ inputs.credit_people }}") \
+            ${{ inputs.dry_run && '--dry-run' || '' }} \
+            --json co-credits.json
+
+      - name: Report
+        if: always()
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          ALERT_EMAIL:    ${{ secrets.ALERT_EMAIL }}
+          EMAIL_FROM:     ${{ secrets.EMAIL_FROM }}
+          ALERT_PREFIX:   ${{ secrets.ALERT_PREFIX }}
+          JOB_STATUS:     ${{ job.status }}
+          RUN_URL:        ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: python3 scripts/report.py --status "$JOB_STATUS" --json co-credits.json --label "co-credits"
