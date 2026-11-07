@@ -1,0 +1,33 @@
+name: Direct probe
+
+# One-off: what a viewer's browser gets from the upstream media hosts when it
+# fetches them itself (no Referer, Origin null). Prints counts per anonymous
+# host only. Remove once read.
+
+on:
+  workflow_dispatch:
+    inputs:
+      n:
+        description: 'Samples per kind'
+        type: number
+        default: 25
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out the private pipeline
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.PRIVATE_REPO }}
+          ref: main
+          ssh-key: ${{ secrets.PIPELINE_DEPLOY_KEY }}
+          path: pipeline
+          fetch-depth: 1
+      - name: Install the token library
+        run: python3 -m pip install --quiet cryptography
+      - name: Probe
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.SYNC_CF_TOKEN }}
+        run: python3 pipeline/scripts/watch/direct_probe.py --n "${{ inputs.n }}"
