@@ -1,0 +1,77 @@
+name: Title covers
+
+# WHAT THIS DOES
+#
+# Reads each film page the catalogue shows without the upstream's own cover and
+# saves that cover. Fetch only: the files are encrypted with a repo secret
+# before upload and kept one day, because this log and its artifacts are
+# public. The mark gate, the storage upload and the database write run on a
+# private machine.
+#
+# Dispatch only, on purpose: a one-off backfill, sharded so no runner reads
+# faster than about one page a second, and at most four at once.
+
+on:
+  workflow_dispatch:
+    inputs:
+      shards:
+        description: 'Shard numbers, JSON list'
+        type: string
+        default: '[0,1,2,3,4,5,6,7]'
+      of:
+        description: 'Shard count'
+        type: number
+        default: 8
+      limit:
+        description: 'Films per shard, 0 for all'
+        type: number
+        default: 0
+
+concurrency:
+  group: title-covers
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        shard: ${{ fromJSON(inputs.shards) }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check out the private pipeline
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.PRIVATE_REPO }}
+          ref: main
+          ssh-key: ${{ secrets.PIPELINE_DEPLOY_KEY }}
+          path: pipeline
+          fetch-depth: 1
+
+      - name: Install the token library
+        run: python3 -m pip install --quiet cryptography
+
+      - name: Fetch
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.SYNC_CF_TOKEN }}
+          IMAGE_SECRET: ${{ secrets.IMAGE_SECRET }}
+          VIDEO_SECRET: ${{ secrets.VIDEO_SECRET }}
+        run: |
+          python3 pipeline/scripts/watch/title_covers.py --shard "${{ matrix.shard }}" --of "${{ inputs.of }}" \
+            --limit "${{ inputs.limit }}" --out covers
+          tar czf covers.tgz covers
+          openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:VIDEO_SECRET -in covers.tgz -out covers.bin
+          rm -rf covers covers.tgz
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: covers-${{ matrix.shard }}
+          path: covers.bin
+          retention-days: 1
+          if-no-files-found: ignore
