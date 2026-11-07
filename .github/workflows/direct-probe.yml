@@ -49,4 +49,9 @@ jobs:
           cd pipeline/scripts/watch/direct-harness
           npm init -y >/dev/null && npm i --silent playwright@1.62.1 >/dev/null
           npx playwright install --with-deps chromium >/dev/null 2>&1
-          node run.mjs "$RUNNER_TEMP/samples.json"
+          E="$RUNNER_TEMP/echo"; mkdir -p "$E"
+          sudo apt-get install -y -qq ffmpeg >/dev/null 2>&1 || true
+          ffmpeg -loglevel error -f lavfi -i testsrc=duration=8:size=320x240:rate=25 -c:v libx264 -g 50 -f hls -hls_time 2 -hls_playlist_type vod "$E/master.m3u8"
+          ffmpeg -loglevel error -f lavfi -i testsrc=duration=8:size=320x240:rate=25 -c:v libx264 -movflags +faststart "$E/clip.mp4"
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=localhost -keyout "$E/key.pem" -out "$E/cert.pem" 2>/dev/null
+          ECHO_DIR="$E" node run.mjs "$RUNNER_TEMP/samples.json"
