@@ -11,11 +11,15 @@ on:
         description: 'Samples per kind'
         type: number
         default: 25
+      mode:
+        description: 'probe (headers) or browser (the real player, direct and blocked)'
+        type: string
+        default: probe
 
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - name: Check out the private pipeline
         uses: actions/checkout@v4
@@ -28,6 +32,21 @@ jobs:
       - name: Install the token library
         run: python3 -m pip install --quiet cryptography
       - name: Probe
+        if: inputs.mode == 'probe'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.SYNC_CF_TOKEN }}
         run: python3 pipeline/scripts/watch/direct_probe.py --n "${{ inputs.n }}"
+      - uses: actions/setup-node@v4
+        if: inputs.mode == 'browser'
+        with:
+          node-version: 22
+      - name: Browser
+        if: inputs.mode == 'browser'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.SYNC_CF_TOKEN }}
+        run: |
+          python3 pipeline/scripts/watch/direct_probe.py --samples "$RUNNER_TEMP/samples.json"
+          cd pipeline/scripts/watch/direct-harness
+          npm init -y >/dev/null && npm i --silent playwright@1.62.1 >/dev/null
+          npx playwright install --with-deps chromium >/dev/null 2>&1
+          node run.mjs "$RUNNER_TEMP/samples.json"
